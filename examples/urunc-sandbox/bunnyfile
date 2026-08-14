@@ -1,0 +1,56 @@
+#syntax=harbor.nbfc.io/nubificus/bunny:latest
+# Copyright 2026 The Kubernetes Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Repackages an existing OCI image so it can boot as a microVM under urunc.
+#
+# Unlike gVisor and Kata, urunc cannot run a stock OCI image unmodified: the
+# image must carry its own kernel plus urunc annotations. bunny is a BuildKit
+# frontend that performs that repackaging, so the result is still an ordinary
+# OCI image that any registry and any CRI can handle.
+#
+# This file takes the image built from examples/python-runtime-sandbox and
+# produces a urunc-bootable equivalent. Nothing in main.py changes.
+#
+# Build with:
+#   BASE_IMAGE=<registry>/python-runtime-sandbox:latest \
+#   IMAGE=<registry>/python-runtime-sandbox-urunc:latest \
+#   docker build -f bunnyfile -t ${IMAGE} --push .
+version: v0.1
+
+platforms:
+  framework: linux
+  monitor: qemu
+  architecture: x86
+
+rootfs:
+  # The unmodified python-runtime-sandbox image. Build and push it first from
+  # examples/python-runtime-sandbox, then point this at your registry.
+  from: ${BASE_IMAGE}
+  type: raw
+  include:
+  # urunit is a minimal init that reads the configuration urunc passes into the
+  # VM and sets up the execution environment before handing off to cmd below.
+  - from: harbor.nbfc.io/nubificus/urunit:latest
+    source: /urunit
+    destination: /urunit
+
+kernel:
+  from: harbor.nbfc.io/nubificus/bunny/linux-kernel-qemu:latest
+  path: /.boot/kernel
+
+entrypoint: ["/urunit"]
+
+# Identical to the CMD in examples/python-runtime-sandbox/Dockerfile.
+cmd: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8888", "--log-level", "trace"]
